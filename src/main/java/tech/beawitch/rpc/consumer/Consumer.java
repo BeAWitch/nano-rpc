@@ -1,4 +1,4 @@
-package tech.beawitch.rpc;
+package tech.beawitch.rpc.consumer;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
@@ -7,9 +7,11 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.LineBasedFrameDecoder;
-import io.netty.handler.codec.string.StringDecoder;
-import io.netty.handler.codec.string.StringEncoder;
+import tech.beawitch.rpc.codec.CustomDecoder;
+import tech.beawitch.rpc.codec.RequestEncoder;
+import tech.beawitch.rpc.message.Request;
+import tech.beawitch.rpc.message.Response;
+import tech.beawitch.rpc.codec.ResponseEncoder;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -24,21 +26,26 @@ public class Consumer {
                     @Override
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
-                                .addLast(new LineBasedFrameDecoder(1024))
-                                .addLast(new StringDecoder())
-                                .addLast(new StringEncoder())
-                                .addLast(new SimpleChannelInboundHandler<String>() {
+                                .addLast(new CustomDecoder())
+                                .addLast(new RequestEncoder())
+                                .addLast(new SimpleChannelInboundHandler<Response>() {
                                     @Override
-                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext, String msg) throws Exception {
-                                        int result = Integer.parseInt(msg);
+                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext,
+                                                                Response response) throws Exception {
+                                        System.out.println(response);
+                                        int result = Integer.parseInt(response.getResult().toString());
                                         addResultFuture.complete(result);
-                                        channelHandlerContext.close();
                                     }
                                 });
                     }
                 });
         ChannelFuture channelFuture = bootstrap.connect("localhost", 8080).sync();
-        channelFuture.channel().writeAndFlush("add," + a + "," + b + "\n");
+        Request request = new Request();
+        request.setServiceName("tech.beawitch.rpc.CalculatorService");
+        request.setMethodName("add");
+        request.setParams(new Object[]{a, b});
+        request.setParamTypes(new String[]{"int", "int"});
+        channelFuture.channel().writeAndFlush(request);
         return addResultFuture.get();
     }
 }

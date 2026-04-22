@@ -1,6 +1,6 @@
-package tech.beawitch.rpc;
+package tech.beawitch.rpc.consumer;
 
-public class Main {
+public class ConsumerApp {
 
     public static void main(String[] args) throws Exception {
         Consumer consumer = new Consumer();
