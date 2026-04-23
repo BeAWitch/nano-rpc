@@ -69,7 +69,7 @@ public class ProviderServer {
         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) {
             ProviderRegistry.Invocation<?> invocation = providerRegistry.findService(request.getServiceName());
             if (invocation == null) {
-                Response failResponse = Response.fail(String.format("服务不存在: %s", request.getServiceName()));
+                Response failResponse = Response.fail(request.getId(), String.format("服务不存在: %s", request.getServiceName()));
                 log.info("服务不存在: {}", request.getServiceName());
                 channelHandlerContext.writeAndFlush(failResponse);
                 return;
@@ -82,9 +82,9 @@ public class ProviderServer {
                         request.getParams()
                 );
                 log.info("成功调用服务 {} 的 {} 方法，结果为: {}", request.getServiceName(), request.getMethodName(), result);
-                channelHandlerContext.writeAndFlush(Response.success(result));
+                channelHandlerContext.writeAndFlush(Response.success(request.getId(), result));
             } catch (Exception e) {
-                Response failResponse = Response.fail(e.getMessage());
+                Response failResponse = Response.fail(request.getId(), e.getMessage());
                 log.info("服务调用异常", e);
                 channelHandlerContext.writeAndFlush(failResponse);
             }
