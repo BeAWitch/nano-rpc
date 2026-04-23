@@ -6,6 +6,6 @@ import lombok.Data;
 public class Request {
     private String serviceName;
     private String methodName;
-    private String[] paramTypes;
+    private Class<?>[] paramTypes;
     private Object[] params;
 }

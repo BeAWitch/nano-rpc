@@ -14,13 +14,20 @@ import tech.beawitch.rpc.message.Response;
 
 public class ProviderServer {
 
-    private int port;
+    private final int port;
+
+    private final ProviderRegistry providerRegistry;
 
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
     public ProviderServer(int port) {
         this.port = port;
+        providerRegistry = new ProviderRegistry();
+    }
+
+    public <I> void register(Class<I> interfaceClass, I serviceInstance) {
+        providerRegistry.register(interfaceClass, serviceInstance);
     }
 
     public void start() {
@@ -40,9 +47,15 @@ public class ProviderServer {
                                         @Override
                                         protected void channelRead0(ChannelHandlerContext channelHandlerContext,
                                                                     Request request) throws Exception {
-                                            System.out.println(request);
+                                            ProviderRegistry.Invocation<?> service =
+                                                    providerRegistry.findService(request.getServiceName());
+                                            Object result = service.invoke(
+                                                    request.getMethodName(),
+                                                    request.getParamTypes(),
+                                                    request.getParams()
+                                            );
                                             Response response = new Response();
-                                            response.setResult(1);
+                                            response.setResult(result);
                                             channelHandlerContext.writeAndFlush(response);
                                         }
                                     });

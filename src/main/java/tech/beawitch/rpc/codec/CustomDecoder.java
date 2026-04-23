@@ -1,6 +1,7 @@
 package tech.beawitch.rpc.codec;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONReader;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
@@ -48,10 +49,18 @@ public class CustomDecoder extends LengthFieldBasedFrameDecoder {
     }
 
     private Request deserializeRequest(byte[] body) {
-        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Request.class);
+        return JSONObject.parseObject(
+                new String(body, StandardCharsets.UTF_8),
+                Request.class,
+                JSONReader.Feature.SupportClassForName
+        );
     }
 
     private Response deserializeResponse(byte[] body) {
-        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Response.class);
+        return JSONObject.parseObject(
+                new String(body, StandardCharsets.UTF_8),
+                Response.class,
+                JSONReader.Feature.SupportClassForName
+        );
     }
 }
