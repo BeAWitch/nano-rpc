@@ -33,5 +33,11 @@
             <artifactId>fastjson2</artifactId>
             <version>2.0.47</version>
         </dependency>
+
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.5.25</version>
+        </dependency>
     </dependencies>
 </project>

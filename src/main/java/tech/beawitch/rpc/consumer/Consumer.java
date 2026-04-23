@@ -10,17 +10,19 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import tech.beawitch.rpc.api.Add;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.RequestEncoder;
+import tech.beawitch.rpc.exception.RpcException;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public class Consumer implements Add {
 
     @Override
     public int add(int a, int b) {
         try {
-            CompletableFuture<Integer> addResultFuture = new CompletableFuture<>();
+            CompletableFuture<Integer> resultFuture = new CompletableFuture<>();
             Bootstrap bootstrap = new Bootstrap();
             bootstrap.group(new NioEventLoopGroup())
                     .channel(NioSocketChannel.class)
@@ -34,9 +36,13 @@ public class Consumer implements Add {
                                         @Override
                                         protected void channelRead0(ChannelHandlerContext channelHandlerContext,
                                                                     Response response) throws Exception {
-                                            System.out.println(response);
-                                            int result = Integer.parseInt(response.getResult().toString());
-                                            addResultFuture.complete(result);
+                                            if (response.getCode() == 200) {
+                                                int result = Integer.parseInt(response.getResult().toString());
+                                                resultFuture.complete(result);
+                                            } else {
+                                                resultFuture.completeExceptionally(new RpcException(response.getErrorMessage()));
+                                            }
+                                            channelHandlerContext.close();
                                         }
                                     });
                         }
@@ -48,7 +54,7 @@ public class Consumer implements Add {
             request.setParams(new Object[]{a, b});
             request.setParamTypes(new Class<?>[]{int.class, int.class});
             channelFuture.channel().writeAndFlush(request);
-            return addResultFuture.get();
+            return resultFuture.get(3, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
