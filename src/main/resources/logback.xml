@@ -6,13 +6,10 @@
         </encoder>
     </appender>
 
-    <!-- 根日志只打印 WARN 及以上，屏蔽 INFO 和 DEBUG -->
-    <root level="WARN">
+    <root level="INFO">
         <appender-ref ref="CONSOLE" />
     </root>
 
-    <!-- 自己的项目：打印 INFO 及以上（包含 INFO、WARN、ERROR） -->
-    <logger name="tech.beawitch.rpc" level="INFO" additivity="false">
-        <appender-ref ref="CONSOLE" />
-    </logger>
+    <logger name="io.netty" level="INFO"/>
+    <logger name="org.apache.zookeeper" level="WARN"/>
 </configuration>

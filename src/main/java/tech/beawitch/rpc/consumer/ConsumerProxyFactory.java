@@ -13,10 +13,15 @@ import tech.beawitch.rpc.codec.RequestEncoder;
 import tech.beawitch.rpc.exception.RpcException;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
+import tech.beawitch.rpc.register.DefaultServiceRegister;
+import tech.beawitch.rpc.register.RegisterConfig;
+import tech.beawitch.rpc.register.ServiceMetadata;
+import tech.beawitch.rpc.register.ServiceRegister;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +34,14 @@ public class ConsumerProxyFactory {
 
     private final ConnectionManager connectionManager = new ConnectionManager(createBootstrap());
 
+    private final ServiceRegister serviceRegister;
+
+    public ConsumerProxyFactory(RegisterConfig registerConfig) throws Exception {
+        this.serviceRegister = new DefaultServiceRegister();
+        serviceRegister.init(registerConfig);
+    }
+
+    @SuppressWarnings("unchecked")
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(
                 Thread.currentThread().getContextClassLoader(),
@@ -53,7 +66,16 @@ public class ConsumerProxyFactory {
 
                         try {
                             CompletableFuture<Response> responseFuture = new CompletableFuture<>();
-                            Channel channel = connectionManager.getChannel("localhost", 8080);
+                            List<ServiceMetadata> serviceMetadata =
+                                    serviceRegister.fetchServiceList(interfaceClass.getName());
+                            if (serviceMetadata == null || serviceMetadata.isEmpty()) {
+                                throw new RpcException(interfaceClass.getName() + "没有可用的提供者");
+                            }
+                            ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                            Channel channel = connectionManager.getChannel(
+                                    providerMetadata.getHost(),
+                                    providerMetadata.getPort()
+                            );
                             if (channel == null) {
                                 throw new RpcException("Provider 连接失败");
                             }
@@ -62,9 +84,11 @@ public class ConsumerProxyFactory {
                             request.setMethodName(method.getName());
                             request.setParams(args);
                             request.setParamTypes(method.getParameterTypes());
+                            inflightRequestMap.put(request.getId(), responseFuture);
                             channel.writeAndFlush(request).addListener(future -> {
-                                if (future.isSuccess()) {
-                                    inflightRequestMap.put(request.getId(), responseFuture);
+                                if (!future.isSuccess()) {
+                                    inflightRequestMap.remove(request.getId());
+                                    responseFuture.completeExceptionally(future.cause());
                                 }
                             });
                             Response response = responseFuture.get(3, TimeUnit.SECONDS);

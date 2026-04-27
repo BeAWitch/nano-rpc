@@ -2,6 +2,8 @@ package tech.beawitch.rpc.provider;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -39,5 +41,9 @@ public class ProviderRegistry {
             Method method = interfaceClass.getDeclaredMethod(methodName, paramsClass);
             return method.invoke(serviceInstance, params);
         }
+    }
+
+    public List<String> allServiceName() {
+        return new ArrayList<>(serviceInstanceMap.keySet());
     }
 }

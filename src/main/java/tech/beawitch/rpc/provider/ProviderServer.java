@@ -12,20 +12,31 @@ import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.ResponseEncoder;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
+import tech.beawitch.rpc.register.DefaultServiceRegister;
+import tech.beawitch.rpc.register.RegisterConfig;
+import tech.beawitch.rpc.register.ServiceMetadata;
+import tech.beawitch.rpc.register.ServiceRegister;
 
 @Slf4j
 public class ProviderServer {
 
     private final int port;
+    private final String host;
 
     private final ProviderRegistry providerRegistry;
+
+    private final ServiceRegister serviceRegister;
+    private final RegisterConfig registerConfig;
 
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
-    public ProviderServer(int port) {
+    public ProviderServer(String host, int port, RegisterConfig registerConfig) {
+        this.host = host;
         this.port = port;
-        providerRegistry = new ProviderRegistry();
+        this.providerRegistry = new ProviderRegistry();
+        this.serviceRegister = new DefaultServiceRegister();
+        this.registerConfig = registerConfig;
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -36,6 +47,7 @@ public class ProviderServer {
         bossEventLoopGroup = new NioEventLoopGroup();
         workerEventLoopGroup = new NioEventLoopGroup(4);
         try {
+            serviceRegister.init(this.registerConfig);
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossEventLoopGroup, workerEventLoopGroup)
                     .channel(NioServerSocketChannel.class)
@@ -49,6 +61,7 @@ public class ProviderServer {
                         }
                     });
             serverBootstrap.bind(port).sync();
+            providerRegistry.allServiceName().stream().map(this::buildMetadata).forEach(serviceRegister::registerService);
         } catch (Exception e) {
             throw new RuntimeException("服务器启动异常", e);
         }
@@ -61,6 +74,14 @@ public class ProviderServer {
         if (workerEventLoopGroup != null) {
             workerEventLoopGroup.shutdownGracefully();
         }
+    }
+
+    private ServiceMetadata buildMetadata(String serviceName) {
+        ServiceMetadata serviceMetaData = new ServiceMetadata();
+        serviceMetaData.setServiceName(serviceName);
+        serviceMetaData.setHost(host);
+        serviceMetaData.setPort(port);
+        return serviceMetaData;
     }
 
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
