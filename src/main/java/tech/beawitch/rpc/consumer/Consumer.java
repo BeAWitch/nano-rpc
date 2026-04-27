@@ -8,6 +8,7 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.api.Add;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.RequestEncoder;
@@ -20,9 +21,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 public class Consumer implements Add {
 
-    private final Map<Integer, CompletableFuture<?>> inflightRequestMap = new ConcurrentHashMap<>();
+    private final Map<Integer, CompletableFuture<Response>> inflightRequestMap = new ConcurrentHashMap<>();
 
     private final ConnectionManager connectionManager = new ConnectionManager(createBootstrap());
 
@@ -40,14 +42,13 @@ public class Consumer implements Add {
                                     @Override
                                     protected void channelRead0(ChannelHandlerContext channelHandlerContext,
                                                                 Response response) throws Exception {
-                                        CompletableFuture requestFuture =
+                                        CompletableFuture<Response> responseFuture =
                                                 inflightRequestMap.remove(response.getRequestId());
-                                        if (response.getCode() == 200) {
-                                            int result = Integer.parseInt(response.getResult().toString());
-                                            requestFuture.complete(result);
-                                        } else {
-                                            requestFuture.completeExceptionally(new RpcException(response.getErrorMessage()));
+                                        if (responseFuture == null) {
+                                            log.warn("无请求结果: {}", response.getRequestId());
+                                            return;
                                         }
+                                        responseFuture.complete(response);
                                     }
                                 });
                     }
@@ -58,7 +59,7 @@ public class Consumer implements Add {
     @Override
     public int add(int a, int b) {
         try {
-            CompletableFuture<Integer> resultFuture = new CompletableFuture<>();
+            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
             Channel channel = connectionManager.getChannel("localhost", 8080);
             if (channel == null) {
                 throw new RpcException("Provider 连接失败");
@@ -70,10 +71,17 @@ public class Consumer implements Add {
             request.setParamTypes(new Class<?>[]{int.class, int.class});
             channel.writeAndFlush(request).addListener(future -> {
                 if (future.isSuccess()) {
-                    inflightRequestMap.put(request.getId(), resultFuture);
+                    inflightRequestMap.put(request.getId(), responseFuture);
                 }
             });
-            return resultFuture.get(3, TimeUnit.SECONDS);
+            Response response = responseFuture.get(3, TimeUnit.SECONDS);
+            if (response.getCode() == 200) {
+                return (int) response.getResult();
+            } else {
+                throw new RpcException(response.getErrorMessage());
+            }
+        } catch (RpcException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
