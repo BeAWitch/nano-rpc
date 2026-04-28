@@ -12,6 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.RequestEncoder;
 import tech.beawitch.rpc.exception.RpcException;
+import tech.beawitch.rpc.loadbalance.LoadBalancer;
+import tech.beawitch.rpc.loadbalance.RandomLoadBalancer;
+import tech.beawitch.rpc.loadbalance.RoundRobinLoadBalancer;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
 import tech.beawitch.rpc.register.DefaultServiceRegistry;
@@ -55,16 +58,26 @@ public class ConsumerProxyFactory {
         return (I) Proxy.newProxyInstance(
                 Thread.currentThread().getContextClassLoader(),
                 new Class[]{interfaceClass},
-                new ConsumerInvocationHandler(interfaceClass)
+                new ConsumerInvocationHandler(interfaceClass, createLoadBalancer())
         );
+    }
+
+    private LoadBalancer createLoadBalancer() {
+        return switch (consumerProperties.getLoadBalancePolicy()) {
+            case RANDOM -> new RandomLoadBalancer();
+            case ROUND_ROBIN -> new RoundRobinLoadBalancer();
+        };
     }
 
     public class ConsumerInvocationHandler implements InvocationHandler {
 
         private final Class<?> interfaceClass;
 
-        public ConsumerInvocationHandler(Class<?> interfaceClass) {
+        private final LoadBalancer loadBalancer;
+
+        public ConsumerInvocationHandler(Class<?> interfaceClass, LoadBalancer loadBalancer) {
             this.interfaceClass = interfaceClass;
+            this.loadBalancer = loadBalancer;
         }
 
         @Override
@@ -79,7 +92,7 @@ public class ConsumerProxyFactory {
                 if (serviceMetadata == null || serviceMetadata.isEmpty()) {
                     throw new RpcException(interfaceClass.getName() + "没有可用的提供者");
                 }
-                ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                ServiceMetadata providerMetadata = loadBalancer.select(serviceMetadata);
                 Channel channel = connectionManager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
                 if (channel == null) {
                     throw new RpcException("Provider 连接失败");
