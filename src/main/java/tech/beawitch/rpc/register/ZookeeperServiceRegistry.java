@@ -9,11 +9,10 @@ import org.apache.curator.x.discovery.ServiceDiscoveryBuilder;
 import org.apache.curator.x.discovery.ServiceInstance;
 import org.apache.curator.x.discovery.details.JsonInstanceSerializer;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
-public class ZookeeperServiceRegister implements ServiceRegister {
+public class ZookeeperServiceRegistry implements ServiceRegistry {
 
     private static final String BASE_PATH = "/rpc";
 
@@ -22,7 +21,7 @@ public class ZookeeperServiceRegister implements ServiceRegister {
     private ServiceDiscovery<ServiceMetadata> discovery;
 
     @Override
-    public void init(RegisterConfig config) throws Exception {
+    public void init(RegistryConfig config) throws Exception {
         this.client = CuratorFrameworkFactory.builder()
                 .connectString(config.getConnectString())
                 .sessionTimeoutMs(5000)

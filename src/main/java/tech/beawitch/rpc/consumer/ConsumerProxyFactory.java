@@ -4,6 +4,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -13,10 +14,10 @@ import tech.beawitch.rpc.codec.RequestEncoder;
 import tech.beawitch.rpc.exception.RpcException;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
-import tech.beawitch.rpc.register.DefaultServiceRegister;
-import tech.beawitch.rpc.register.RegisterConfig;
+import tech.beawitch.rpc.register.DefaultServiceRegistry;
+import tech.beawitch.rpc.register.RegistryConfig;
 import tech.beawitch.rpc.register.ServiceMetadata;
-import tech.beawitch.rpc.register.ServiceRegister;
+import tech.beawitch.rpc.register.ServiceRegistry;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -25,20 +26,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Slf4j
 public class ConsumerProxyFactory {
 
-    private final Map<Integer, CompletableFuture<Response>> inflightRequestMap = new ConcurrentHashMap<>();
+    private final Map<Integer, CompletableFuture<Response>> inflightRequestMap;
 
-    private final ConnectionManager connectionManager = new ConnectionManager(createBootstrap());
+    private final ConnectionManager connectionManager;
 
-    private final ServiceRegister serviceRegister;
+    private final ServiceRegistry serviceRegistry;
 
-    public ConsumerProxyFactory(RegisterConfig registerConfig) throws Exception {
-        this.serviceRegister = new DefaultServiceRegister();
-        serviceRegister.init(registerConfig);
+    private final ConsumerProperties consumerProperties;
+
+
+    public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
+        this.serviceRegistry = new DefaultServiceRegistry();
+        this.serviceRegistry.init(consumerProperties.getRegistryConfig());
+        this.connectionManager = new ConnectionManager(createBootstrap(consumerProperties));
+        this.inflightRequestMap = new ConcurrentHashMap<>();
+        this.consumerProperties = consumerProperties;
     }
 
     @SuppressWarnings("unchecked")
@@ -46,90 +55,129 @@ public class ConsumerProxyFactory {
         return (I) Proxy.newProxyInstance(
                 Thread.currentThread().getContextClassLoader(),
                 new Class[]{interfaceClass},
-                new InvocationHandler() {
-                    @Override
-                    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                        if (method.getDeclaringClass() == Object.class) {
-                            if ("equals".equals(method.getName())) {
-                                return proxy == args[0];
-                            }
-                            if ("hashCode".equals(method.getName())) {
-                                return System.identityHashCode(proxy);
-                            }
-                            if ("toString".equals(method.getName())) {
-                                return proxy.getClass().getName() + "@" +
-                                        Integer.toHexString(System.identityHashCode(proxy)) +
-                                        ", with InvocationHandler " + this;
-                            }
-                            throw new UnsupportedOperationException("代理对象不支持这个方法：" + method.getName());
-                        }
-
-                        try {
-                            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
-                            List<ServiceMetadata> serviceMetadata =
-                                    serviceRegister.fetchServiceList(interfaceClass.getName());
-                            if (serviceMetadata == null || serviceMetadata.isEmpty()) {
-                                throw new RpcException(interfaceClass.getName() + "没有可用的提供者");
-                            }
-                            ServiceMetadata providerMetadata = serviceMetadata.get(0);
-                            Channel channel = connectionManager.getChannel(
-                                    providerMetadata.getHost(),
-                                    providerMetadata.getPort()
-                            );
-                            if (channel == null) {
-                                throw new RpcException("Provider 连接失败");
-                            }
-                            Request request = new Request();
-                            request.setServiceName(interfaceClass.getName());
-                            request.setMethodName(method.getName());
-                            request.setParams(args);
-                            request.setParamTypes(method.getParameterTypes());
-                            inflightRequestMap.put(request.getId(), responseFuture);
-                            channel.writeAndFlush(request).addListener(future -> {
-                                if (!future.isSuccess()) {
-                                    inflightRequestMap.remove(request.getId());
-                                    responseFuture.completeExceptionally(future.cause());
-                                }
-                            });
-                            Response response = responseFuture.get(3, TimeUnit.SECONDS);
-                            if (response.getCode() == 200) {
-                                return response.getResult();
-                            }
-                            throw new RpcException(response.getErrorMessage());
-                        } catch (RpcException e) {
-                            throw e;
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                });
+                new ConsumerInvocationHandler(interfaceClass)
+        );
     }
 
-    private Bootstrap createBootstrap() {
+    public class ConsumerInvocationHandler implements InvocationHandler {
+
+        private final Class<?> interfaceClass;
+
+        public ConsumerInvocationHandler(Class<?> interfaceClass) {
+            this.interfaceClass = interfaceClass;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            if (method.getDeclaringClass() == Object.class) {
+                return invokeObjectMethod(proxy, method, args);
+            }
+
+            CompletableFuture<Response> responseFuture = new CompletableFuture<>();
+            try {
+                List<ServiceMetadata> serviceMetadata = serviceRegistry.fetchServiceList(interfaceClass.getName());
+                if (serviceMetadata == null || serviceMetadata.isEmpty()) {
+                    throw new RpcException(interfaceClass.getName() + "没有可用的提供者");
+                }
+                ServiceMetadata providerMetadata = serviceMetadata.get(0);
+                Channel channel = connectionManager.getChannel(providerMetadata.getHost(), providerMetadata.getPort());
+                if (channel == null) {
+                    throw new RpcException("Provider 连接失败");
+                }
+                Request request = buildRequest(method, args);
+                inflightRequestMap.put(request.getId(), responseFuture);
+                channel.writeAndFlush(request).addListener(future -> {
+                    if (!future.isSuccess()) {
+                        inflightRequestMap.remove(request.getId());
+                        responseFuture.completeExceptionally(future.cause());
+                    }
+                });
+                return processResponse(responseFuture);
+            } catch (RpcException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private Object processResponse(CompletableFuture<Response> responseFuture) throws InterruptedException,
+                ExecutionException, TimeoutException {
+            Response response = responseFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
+            if (response.getCode() == 200) {
+                return response.getResult();
+            }
+            throw new RpcException(response.getErrorMessage());
+        }
+
+        private Request buildRequest(Method method, Object[] args) {
+            Request request = new Request();
+            request.setServiceName(interfaceClass.getName());
+            request.setMethodName(method.getName());
+            request.setParams(args);
+            request.setParamTypes(method.getParameterTypes());
+            return request;
+        }
+
+        private Object invokeObjectMethod(Object proxy, Method method, Object[] args) {
+            if ("equals".equals(method.getName())) {
+                return proxy == args[0];
+            }
+            if ("hashCode".equals(method.getName())) {
+                return System.identityHashCode(proxy);
+            }
+            if ("toString".equals(method.getName())) {
+                return proxy.getClass().getName() + "@" +
+                        Integer.toHexString(System.identityHashCode(proxy)) +
+                        ", with InvocationHandler " + this;
+            }
+            throw new UnsupportedOperationException("代理对象不支持这个方法：" + method.getName());
+        }
+    }
+
+    private Bootstrap createBootstrap(ConsumerProperties consumerProperties) {
         Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(new NioEventLoopGroup())
+        bootstrap.group(new NioEventLoopGroup(consumerProperties.getWorkThreadNum()))
                 .channel(NioSocketChannel.class)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, consumerProperties.getConnectTimeoutMs())
                 .handler(new ChannelInitializer<NioSocketChannel>() {
                     @Override
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
                                 .addLast(new CustomDecoder())
                                 .addLast(new RequestEncoder())
-                                .addLast(new SimpleChannelInboundHandler<Response>() {
-                                    @Override
-                                    protected void channelRead0(ChannelHandlerContext channelHandlerContext,
-                                                                Response response) throws Exception {
-                                        CompletableFuture<Response> responseFuture =
-                                                inflightRequestMap.remove(response.getRequestId());
-                                        if (responseFuture == null) {
-                                            log.warn("无请求结果: {}", response.getRequestId());
-                                            return;
-                                        }
-                                        responseFuture.complete(response);
-                                    }
-                                });
+                                .addLast(new ConsumerHandler());
                     }
                 });
         return bootstrap;
+    }
+
+    private class ConsumerHandler extends SimpleChannelInboundHandler<Response> {
+
+        @Override
+        protected void channelRead0(ChannelHandlerContext channelHandlerContext, Response response) throws Exception {
+            CompletableFuture<Response> responseFuture =
+                    inflightRequestMap.remove(response.getRequestId());
+            if (responseFuture == null) {
+                log.warn("无请求结果: {}", response.getRequestId());
+                return;
+            }
+            responseFuture.complete(response);
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            log.info("地址：{} 连接了", ctx.channel().remoteAddress());
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            log.info("地址：{} 断开了", ctx.channel().remoteAddress());
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+            log.error("发生了异常", cause);
+            ctx.channel().close();
+        }
     }
 }

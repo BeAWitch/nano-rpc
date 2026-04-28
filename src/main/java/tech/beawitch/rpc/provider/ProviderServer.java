@@ -12,31 +12,27 @@ import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.ResponseEncoder;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
-import tech.beawitch.rpc.register.DefaultServiceRegister;
-import tech.beawitch.rpc.register.RegisterConfig;
+import tech.beawitch.rpc.register.DefaultServiceRegistry;
+import tech.beawitch.rpc.register.RegistryConfig;
 import tech.beawitch.rpc.register.ServiceMetadata;
-import tech.beawitch.rpc.register.ServiceRegister;
+import tech.beawitch.rpc.register.ServiceRegistry;
 
 @Slf4j
 public class ProviderServer {
 
-    private final int port;
-    private final String host;
+    private final ProviderProperties providerProperties;
 
     private final ProviderRegistry providerRegistry;
 
-    private final ServiceRegister serviceRegister;
-    private final RegisterConfig registerConfig;
+    private final ServiceRegistry serviceRegistry;
 
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
-    public ProviderServer(String host, int port, RegisterConfig registerConfig) {
-        this.host = host;
-        this.port = port;
+    public ProviderServer(ProviderProperties providerProperties) {
+        this.providerProperties = providerProperties;
         this.providerRegistry = new ProviderRegistry();
-        this.serviceRegister = new DefaultServiceRegister();
-        this.registerConfig = registerConfig;
+        this.serviceRegistry = new DefaultServiceRegistry();
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -45,9 +41,9 @@ public class ProviderServer {
 
     public void start() {
         bossEventLoopGroup = new NioEventLoopGroup();
-        workerEventLoopGroup = new NioEventLoopGroup(4);
+        workerEventLoopGroup = new NioEventLoopGroup(providerProperties.getWorkerThreadNum());
         try {
-            serviceRegister.init(this.registerConfig);
+            serviceRegistry.init(this.providerProperties.getRegistryConfig());
             ServerBootstrap serverBootstrap = new ServerBootstrap();
             serverBootstrap.group(bossEventLoopGroup, workerEventLoopGroup)
                     .channel(NioServerSocketChannel.class)
@@ -60,8 +56,8 @@ public class ProviderServer {
                                     .addLast(new ProviderHandler());
                         }
                     });
-            serverBootstrap.bind(port).sync();
-            providerRegistry.allServiceName().stream().map(this::buildMetadata).forEach(serviceRegister::registerService);
+            serverBootstrap.bind(providerProperties.getHost(), providerProperties.getPort()).sync();
+            providerRegistry.allServiceName().stream().map(this::buildMetadata).forEach(serviceRegistry::registerService);
         } catch (Exception e) {
             throw new RuntimeException("服务器启动异常", e);
         }
@@ -79,8 +75,8 @@ public class ProviderServer {
     private ServiceMetadata buildMetadata(String serviceName) {
         ServiceMetadata serviceMetaData = new ServiceMetadata();
         serviceMetaData.setServiceName(serviceName);
-        serviceMetaData.setHost(host);
-        serviceMetaData.setPort(port);
+        serviceMetaData.setHost(providerProperties.getHost());
+        serviceMetaData.setPort(providerProperties.getPort());
         return serviceMetaData;
     }
 
@@ -123,7 +119,7 @@ public class ProviderServer {
 
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-            log.info("服务端异常", cause);
+            log.error("发生了异常", cause);
             ctx.channel().close();
         }
     }

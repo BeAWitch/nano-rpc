@@ -2,9 +2,9 @@ package tech.beawitch.rpc.register;
 
 import java.util.List;
 
-public interface ServiceRegister {
+public interface ServiceRegistry {
 
-    void init(RegisterConfig config) throws Exception;
+    void init(RegistryConfig config) throws Exception;
 
     void registerService(ServiceMetadata metadata);
 

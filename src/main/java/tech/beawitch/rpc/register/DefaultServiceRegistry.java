@@ -8,14 +8,14 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
-public class DefaultServiceRegister implements ServiceRegister {
+public class DefaultServiceRegistry implements ServiceRegistry {
 
-    private ServiceRegister delegate;
+    private ServiceRegistry delegate;
 
     private final Map<String, List<ServiceMetadata>> cache = new ConcurrentHashMap<>();
 
     @Override
-    public void init(RegisterConfig config) throws Exception {
+    public void init(RegistryConfig config) throws Exception {
         this.delegate = create(config);
         delegate.init(config);
     }
@@ -38,9 +38,9 @@ public class DefaultServiceRegister implements ServiceRegister {
         }
     }
 
-    private ServiceRegister create(RegisterConfig config) {
+    private ServiceRegistry create(RegistryConfig config) {
         if ("zookeeper".equals(config.getRegisterType())) {
-            return new ZookeeperServiceRegister();
+            return new ZookeeperServiceRegistry();
         }
         throw new RuntimeException("不支持的注册中心类型：" + config.getRegisterType());
     }

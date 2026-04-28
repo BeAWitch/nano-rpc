@@ -27,25 +27,33 @@ public class CustomDecoder extends LengthFieldBasedFrameDecoder {
     @Override
     protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
         ByteBuf frame = (ByteBuf) super.decode(ctx, in);
-
-        // 读取魔数
-        byte[] magicNumber = new byte[Message.MAGIC_NUMBER.length];
-        frame.readBytes(magicNumber);
-        if (!Arrays.equals(magicNumber, Message.MAGIC_NUMBER)) {
-            throw new Exception("无效的魔数");
+        if (frame == null) {
+            return null;
         }
 
-        // 读取消息类型和消息体
-        byte messageType = frame.readByte();
-        byte[] body = new byte[frame.readableBytes()];
-        frame.readBytes(body);
-        if (Objects.equals(messageType, Message.MessageType.REQUEST.getCode())) {
-            return deserializeRequest(body);
+        try {
+            // 读取魔数
+            byte[] magicNumber = new byte[Message.MAGIC_NUMBER.length];
+            frame.readBytes(magicNumber);
+            if (!Arrays.equals(magicNumber, Message.MAGIC_NUMBER)) {
+                throw new Exception("无效的魔数");
+            }
+
+            // 读取消息类型和消息体
+            byte messageType = frame.readByte();
+            byte[] body = new byte[frame.readableBytes()];
+            frame.readBytes(body);
+            if (Objects.equals(messageType, Message.MessageType.REQUEST.getCode())) {
+                return deserializeRequest(body);
+            }
+            if (Objects.equals(messageType, Message.MessageType.RESPONSE.getCode())) {
+                return deserializeResponse(body);
+            }
+            throw new Exception("无效的消息类型：" + messageType);
+        } finally {
+            // ByteBuf 为 native，存在本地内存中，使用引用计数进行内存回收，需要手动释放使引用减一
+            frame.release();
         }
-        if (Objects.equals(messageType, Message.MessageType.RESPONSE.getCode())) {
-            return deserializeResponse(body);
-        }
-        throw new Exception("无效的消息类型：" + messageType);
     }
 
     private Request deserializeRequest(byte[] body) {
