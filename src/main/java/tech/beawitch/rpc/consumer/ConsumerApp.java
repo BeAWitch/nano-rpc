@@ -14,10 +14,5 @@ public class ConsumerApp {
         ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(consumerProperties);
         Add consumerProxy = consumerProxyFactory.createConsumerProxy(Add.class);
         System.out.println(consumerProxy.add(1, 2));
-        System.out.println(consumerProxy.add(11, 2));
-        while (true) {
-            Thread.sleep(1000);
-            System.out.println(consumerProxy.add(11, 2));
-        }
     }
 }

@@ -1,6 +1,6 @@
 package tech.beawitch.rpc.loadbalance;
 
-public enum LoadBalancePolicy {
+public enum LoadBalancePolicyType {
     ROUND_ROBIN,
     RANDOM
 }
