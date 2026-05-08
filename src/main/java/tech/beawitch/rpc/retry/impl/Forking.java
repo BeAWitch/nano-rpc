@@ -1,4 +1,4 @@
-package tech.beawitch.rpc.retry.policyImpl;
+package tech.beawitch.rpc.retry.impl;
 
 import tech.beawitch.rpc.exception.RpcException;
 import tech.beawitch.rpc.message.Response;

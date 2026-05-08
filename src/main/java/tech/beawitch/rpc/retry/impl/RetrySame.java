@@ -1,4 +1,4 @@
-package tech.beawitch.rpc.retry.policyImpl;
+package tech.beawitch.rpc.retry.impl;
 
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.exception.RpcException;
@@ -8,7 +8,6 @@ import tech.beawitch.rpc.retry.RetryPolicy;
 
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 

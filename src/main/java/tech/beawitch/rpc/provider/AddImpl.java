@@ -14,7 +14,6 @@ public class AddImpl implements Add {
         if (random.nextBoolean()) {
             LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(4));
         }*/
-        LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(4));
         return a + b;
     }
 }

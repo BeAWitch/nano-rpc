@@ -11,6 +11,8 @@ public class ConsumerProperties {
     private Integer connectTimeoutMs = 3000;
     private Integer requestTimeoutMs = 3000;
     private Integer methodTimeoutMs = 10000;
+    private Integer rpcPerSecond = 10;
+    private Integer rpcPerChannel = 5;
     private RegistryConfig registryConfig = new RegistryConfig();
 
     private LoadBalancePolicyType loadBalancePolicyType = LoadBalancePolicyType.ROUND_ROBIN;

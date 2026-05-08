@@ -1,21 +1,29 @@
 package tech.beawitch.rpc.provider;
 
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.ResponseEncoder;
+import tech.beawitch.rpc.limit.Limiter;
+import tech.beawitch.rpc.limit.impl.ConcurrencyLimiter;
+import tech.beawitch.rpc.limit.impl.RateLimiter;
 import tech.beawitch.rpc.message.Request;
 import tech.beawitch.rpc.message.Response;
 import tech.beawitch.rpc.register.DefaultServiceRegistry;
 import tech.beawitch.rpc.register.RegistryConfig;
 import tech.beawitch.rpc.register.ServiceMetadata;
 import tech.beawitch.rpc.register.ServiceRegistry;
+
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public class ProviderServer {
@@ -26,6 +34,8 @@ public class ProviderServer {
 
     private final ServiceRegistry serviceRegistry;
 
+    private final Limiter globalLimiter;
+
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
@@ -33,6 +43,7 @@ public class ProviderServer {
         this.providerProperties = providerProperties;
         this.providerRegistry = new ProviderRegistry();
         this.serviceRegistry = new DefaultServiceRegistry();
+        this.globalLimiter = new ConcurrencyLimiter(providerProperties.getGlobalMaxRequest());
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -53,6 +64,7 @@ public class ProviderServer {
                             nioSocketChannel.pipeline()
                                     .addLast(new CustomDecoder())
                                     .addLast(new ResponseEncoder())
+                                    .addLast(new LimitHandler())
                                     .addLast(new ProviderHandler());
                         }
                     });
@@ -80,13 +92,65 @@ public class ProviderServer {
         return serviceMetaData;
     }
 
+    public class LimitHandler extends ChannelDuplexHandler {
+
+        private static final AttributeKey<Limiter> CHANNEL_LIMITER_KEY = AttributeKey.valueOf("channel_limiter_key");
+        private static final AttributeKey<AtomicInteger> GLOBAL_PERMISSIONS = AttributeKey.valueOf("global_permissions");
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            Request request = (Request) msg;
+            if (!globalLimiter.tryAcquire()) {
+                ctx.writeAndFlush(Response.fail(request.getId(), "provider 全局限流"));
+            }
+            Limiter channelLimiter = ctx.channel().attr(CHANNEL_LIMITER_KEY).get();
+            if (!channelLimiter.tryAcquire()) {
+                globalLimiter.release();
+                ctx.writeAndFlush(Response.fail(request.getId(), "provider channel 限流"));
+                return;
+            }
+            ctx.channel().attr(GLOBAL_PERMISSIONS).get().incrementAndGet();
+            ctx.fireChannelRead(request);
+        }
+
+        @Override
+        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+            promise.addListener(future -> {
+                int permissions = ctx.channel().attr(GLOBAL_PERMISSIONS).get().getAndDecrement();
+                if (permissions > 0) {
+                    ctx.channel().attr(CHANNEL_LIMITER_KEY).get().release();
+                    globalLimiter.release();
+                }
+            });
+            ctx.write(msg, promise);
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) {
+            Limiter channelLimiter = new RateLimiter(providerProperties.getMaxRequestPerConsumer());
+            ctx.channel().attr(CHANNEL_LIMITER_KEY).set(channelLimiter);
+            ctx.channel().attr(GLOBAL_PERMISSIONS).set(new AtomicInteger(0));
+            ctx.fireChannelActive();
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) {
+            int permissions = ctx.channel().attr(GLOBAL_PERMISSIONS).get().getAndSet(0);
+            globalLimiter.release(permissions);
+            ctx.fireChannelInactive();
+        }
+    }
+
     public class ProviderHandler extends SimpleChannelInboundHandler<Request> {
 
         @Override
         protected void channelRead0(ChannelHandlerContext channelHandlerContext, Request request) {
             ProviderRegistry.Invocation<?> invocation = providerRegistry.findService(request.getServiceName());
             if (invocation == null) {
-                Response failResponse = Response.fail(request.getId(), String.format("服务不存在: %s", request.getServiceName()));
+                Response failResponse = Response.fail(
+                        request.getId(),
+                        String.format("服务不存在: %s", request.getServiceName())
+                );
                 log.info("服务不存在: {}", request.getServiceName());
                 channelHandlerContext.writeAndFlush(failResponse);
                 return;
