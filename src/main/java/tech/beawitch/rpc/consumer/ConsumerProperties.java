@@ -14,6 +14,8 @@ public class ConsumerProperties {
     private Integer rpcPerSecond = 10;
     private Integer rpcPerChannel = 5;
     private RegistryConfig registryConfig = new RegistryConfig();
+    private double slowRequestRatio = 0.5;
+    private long slowRequestMs = 1000;
 
     private LoadBalancePolicyType loadBalancePolicyType = LoadBalancePolicyType.ROUND_ROBIN;
     private RetryPolicyType retryPolicyType = RetryPolicyType.RETRY_SAME;
