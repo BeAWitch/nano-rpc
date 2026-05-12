@@ -5,6 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.breaker.CircuitBreaker;
 import tech.beawitch.rpc.breaker.CircuitBreakerManager;
 import tech.beawitch.rpc.exception.RpcException;
+import tech.beawitch.rpc.fallback.Fallback;
+import tech.beawitch.rpc.fallback.impl.CacheFallback;
+import tech.beawitch.rpc.fallback.impl.DefaultFallback;
+import tech.beawitch.rpc.fallback.impl.MockFallback;
 import tech.beawitch.rpc.loadbalance.LoadBalancer;
 import tech.beawitch.rpc.loadbalance.RandomLoadBalancer;
 import tech.beawitch.rpc.loadbalance.RoundRobinLoadBalancer;
@@ -43,6 +47,8 @@ public class ConsumerProxyFactory {
 
     private final CircuitBreakerManager circuitBreakerManager;
 
+    private final Fallback fallback;
+
     public ConsumerProxyFactory(ConsumerProperties consumerProperties) throws Exception {
         this.serviceRegistry = new DefaultServiceRegistry();
         this.serviceRegistry.init(consumerProperties.getRegistryConfig());
@@ -50,6 +56,7 @@ public class ConsumerProxyFactory {
         this.connectionManager = new ConnectionManager(inFlightRequestManager, consumerProperties);
         this.circuitBreakerManager = new CircuitBreakerManager(consumerProperties);
         this.consumerProperties = consumerProperties;
+        this.fallback = new DefaultFallback(new CacheFallback(), new MockFallback());
     }
 
     @SuppressWarnings("unchecked")
@@ -98,21 +105,29 @@ public class ConsumerProxyFactory {
             List<ServiceMetadata> serviceMetadataList =
                     new ArrayList<>(serviceRegistry.fetchServiceList(interfaceClass.getName()));
             ServiceMetadata providerMetadata = selectProvider(serviceMetadataList);
-            Request request = buildRequest(method, args);
-            Response response;
             RpcCallMetrics rpcCallMetrics = RpcCallMetrics.create(method, args, providerMetadata);
+            if (providerMetadata == null) {
+                return fallback.fallback(rpcCallMetrics);
+            }
+            Request request = buildRequest(method, args);
             CircuitBreaker breaker = circuitBreakerManager.getOrCreateCircuitBreaker(providerMetadata);
             try {
                 CompletableFuture<Response> requestFuture = callRpcAsync(request, providerMetadata);
-                response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
-                rpcCallMetrics.complete();
+                Response response = requestFuture.get(consumerProperties.getRequestTimeoutMs(), TimeUnit.MILLISECONDS);
+                rpcCallMetrics.complete(response);
                 breaker.recordRpc(rpcCallMetrics);
+                fallback.recordMetrics(rpcCallMetrics);
+                return processResponse(response);
             } catch (Exception e) {
                 rpcCallMetrics.completeExceptionally(e);
                 breaker.recordRpc(rpcCallMetrics);
-                response = doRetry(rpcCallMetrics, serviceMetadataList);
             }
-            return processResponse(response);
+
+            try {
+                return processResponse(doRetry(rpcCallMetrics, serviceMetadataList));
+            } catch (Exception e) {
+                return fallback.fallback(rpcCallMetrics);
+            }
         }
 
         private ServiceMetadata selectProvider(List<ServiceMetadata> candidateProviders) {
@@ -124,7 +139,7 @@ public class ConsumerProxyFactory {
                 }
                 candidateProviders.remove(metadata);
             }
-            throw new RpcException("没有可用的服务提供者");
+            return null;
         }
 
         private Response doRetry(RpcCallMetrics rpcCallMetrics, List<ServiceMetadata> serviceMetadata) throws Exception {
@@ -173,7 +188,7 @@ public class ConsumerProxyFactory {
                         buildRequest(rpcCallMetrics.getMethod(), rpcCallMetrics.getParams()), provider);
                 retryFuture.whenComplete((r, t) -> {
                     if (t == null) {
-                        retryMetrics.complete();
+                        retryMetrics.complete(r);
                     } else {
                         retryMetrics.completeExceptionally(t);
                     }
