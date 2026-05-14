@@ -1,40 +1,62 @@
 package tech.beawitch.rpc.message;
 
+import lombok.Data;
+import lombok.Getter;
+
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 自定义消息格式
  */
+@Data
 public class Message {
+
     public static final byte[] MAGIC_NUMBER = "CustomMessage".getBytes(StandardCharsets.UTF_8);
 
     private byte[] magicNumber;
 
     private byte messageType;
 
+    private short version;
+
+    private byte serializerAndCompressor;
+
     private byte[] body;
 
+    @Getter
     public enum MessageType {
-        REQUEST(1),
-        RESPONSE(2);
+        REQUEST(1, Request.class),
+        RESPONSE(2, Response.class);
 
+        private static final Map<Class<?>, MessageType> CLASS_CACHE = new HashMap<>();
+        private static final Map<Byte, MessageType> CODE_CACHE = new HashMap<>();
         private final byte code;
+        private final Class<?> messageClass;
 
-        MessageType(int code) {
-            this.code = (byte) code;
-        }
-
-        public byte getCode() {
-            return code;
-        }
-
-        public static MessageType valueOf(byte code) {
+        static {
             for (MessageType value : values()) {
-                if (value.code == code) {
-                    return value;
+                if (CLASS_CACHE.put(value.messageClass, value) != null) {
+                    throw new IllegalArgumentException("重复的消息类: " + value.messageClass);
+                }
+                if (CODE_CACHE.put(value.code, value) != null) {
+                    throw new IllegalArgumentException("重复的消息码: " + value.code);
                 }
             }
-            return null;
+        }
+
+        MessageType(int code, Class<?> messageClass) {
+            this.code = (byte) code;
+            this.messageClass = messageClass;
+        }
+
+        public static MessageType ofClass(Class<?> clazz) {
+            return CLASS_CACHE.get(clazz);
+        }
+
+        public static MessageType ofCode(byte code) {
+            return CODE_CACHE.get(code);
         }
     }
 }

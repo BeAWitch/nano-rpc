@@ -11,9 +11,12 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
+import tech.beawitch.rpc.codec.CustomEncoder;
 import tech.beawitch.rpc.codec.RequestEncoder;
+import tech.beawitch.rpc.compressor.CompressorManager;
 import tech.beawitch.rpc.message.Response;
 import tech.beawitch.rpc.register.ServiceMetadata;
+import tech.beawitch.rpc.serializer.SerializerManager;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,10 +32,16 @@ public class ConnectionManager {
 
     private final ConsumerProperties consumerProperties;
 
+    private final SerializerManager serializerManager;
+
+    private final CompressorManager compressorManager;
+
     public ConnectionManager(InFlightRequestManager inFlightRequestManager, ConsumerProperties consumerProperties) {
         this.bootstrap = createBootstrap(consumerProperties);
         this.inFlightRequestManager = inFlightRequestManager;
         this.consumerProperties = consumerProperties;
+        this.serializerManager = new SerializerManager();
+        this.compressorManager = new CompressorManager();
     }
 
     public Channel getChannel(ServiceMetadata serviceMetadata) {
@@ -71,7 +80,7 @@ public class ConnectionManager {
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
                                 .addLast(new CustomDecoder())
-                                .addLast(new RequestEncoder())
+                                .addLast(new CustomEncoder())
                                 .addLast(new ConsumerHandler());
                     }
                 });
@@ -88,11 +97,17 @@ public class ConnectionManager {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址：{} 连接了", ctx.channel().remoteAddress());
+            ctx.channel().attr(CustomEncoder.SERIALIZER_KEY).set(consumerProperties.getSerializerAlgorithm().getCode());
+            ctx.channel().attr(CustomEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
+            ctx.channel().attr(CustomEncoder.COMPRESSOR_KEY).set(consumerProperties.getCompressorAlgorithm().getCode());
+            ctx.channel().attr(CustomEncoder.COMPRESSOR_MANAGER_KEY).set(compressorManager);
+            ctx.fireChannelActive();
         }
 
         @Override
         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
             log.info("地址：{} 断开了", ctx.channel().remoteAddress());
+            ctx.fireChannelInactive();
         }
 
         @Override

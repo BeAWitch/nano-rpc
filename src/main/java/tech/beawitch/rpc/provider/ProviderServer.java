@@ -12,6 +12,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
+import tech.beawitch.rpc.codec.CustomEncoder;
 import tech.beawitch.rpc.codec.ResponseEncoder;
 import tech.beawitch.rpc.limit.Limiter;
 import tech.beawitch.rpc.limit.impl.ConcurrencyLimiter;
@@ -22,6 +23,7 @@ import tech.beawitch.rpc.register.DefaultServiceRegistry;
 import tech.beawitch.rpc.register.RegistryConfig;
 import tech.beawitch.rpc.register.ServiceMetadata;
 import tech.beawitch.rpc.register.ServiceRegistry;
+import tech.beawitch.rpc.serializer.SerializerManager;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -36,6 +38,8 @@ public class ProviderServer {
 
     private final Limiter globalLimiter;
 
+    private final SerializerManager serializerManager;
+
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
@@ -44,6 +48,7 @@ public class ProviderServer {
         this.providerRegistry = new ProviderRegistry();
         this.serviceRegistry = new DefaultServiceRegistry();
         this.globalLimiter = new ConcurrencyLimiter(providerProperties.getGlobalMaxRequest());
+        this.serializerManager = new SerializerManager();
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -63,7 +68,7 @@ public class ProviderServer {
                         protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                             nioSocketChannel.pipeline()
                                     .addLast(new CustomDecoder())
-                                    .addLast(new ResponseEncoder())
+                                    .addLast(new CustomEncoder())
                                     .addLast(new LimitHandler())
                                     .addLast(new ProviderHandler());
                         }
@@ -130,6 +135,8 @@ public class ProviderServer {
             Limiter channelLimiter = new RateLimiter(providerProperties.getMaxRequestPerConsumer());
             ctx.channel().attr(CHANNEL_LIMITER_KEY).set(channelLimiter);
             ctx.channel().attr(GLOBAL_PERMISSIONS).set(new AtomicInteger(0));
+            ctx.channel().attr(CustomEncoder.SERIALIZER_KEY).set(providerProperties.getSerializerAlgorithm().getCode());
+            ctx.channel().attr(CustomEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
             ctx.fireChannelActive();
         }
 
