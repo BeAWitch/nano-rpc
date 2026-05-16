@@ -1,6 +1,7 @@
 package tech.beawitch.rpc.provider;
 
 import lombok.Data;
+import tech.beawitch.rpc.compressor.Compressor;
 import tech.beawitch.rpc.register.RegistryConfig;
 import tech.beawitch.rpc.serializer.Serializer;
 
@@ -14,4 +15,5 @@ public class ProviderProperties {
     private RegistryConfig registryConfig;
 
     private Serializer.SerializerAlgorithm serializerAlgorithm = Serializer.SerializerAlgorithm.JSON;
+    private Compressor.CompressorAlgorithm compressorAlgorithm = Compressor.CompressorAlgorithm.NONE;
 }

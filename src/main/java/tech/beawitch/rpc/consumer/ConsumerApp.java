@@ -14,20 +14,11 @@ public class ConsumerApp {
         registryConfig.setRegisterType("zookeeper");
         registryConfig.setConnectString("localhost:2181");
         consumerProperties.setRegistryConfig(registryConfig);
-        consumerProperties.setRpcPerSecond(1000);
-        consumerProperties.setRpcPerChannel(1000);
         ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(consumerProperties);
         Add consumerProxy = consumerProxyFactory.createConsumerProxy(Add.class);
-        CyclicBarrier cyclicBarrier = new CyclicBarrier(10);
-        for (int i = 0; i < 10; i++) {
-            new Thread(() -> {
-                try {
-                    cyclicBarrier.await();
-                    System.out.println(consumerProxy.add(1, 2));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }).start();
+        while (true) {
+            Thread.sleep(1000);
+            System.out.println(consumerProxy.add(1, 2));
         }
     }
 }

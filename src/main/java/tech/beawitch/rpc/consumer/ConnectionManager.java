@@ -9,17 +9,21 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.CustomEncoder;
 import tech.beawitch.rpc.codec.RequestEncoder;
 import tech.beawitch.rpc.compressor.CompressorManager;
+import tech.beawitch.rpc.handler.HeartbeatHandler;
+import tech.beawitch.rpc.handler.TrafficRecordHandler;
 import tech.beawitch.rpc.message.Response;
 import tech.beawitch.rpc.register.ServiceMetadata;
 import tech.beawitch.rpc.serializer.SerializerManager;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 public class ConnectionManager {
@@ -79,8 +83,11 @@ public class ConnectionManager {
                     @Override
                     protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                         nioSocketChannel.pipeline()
+                                .addLast(new TrafficRecordHandler())
                                 .addLast(new CustomDecoder())
                                 .addLast(new CustomEncoder())
+                                .addLast(new IdleStateHandler(30, 5, 0, TimeUnit.SECONDS))
+                                .addLast(new HeartbeatHandler())
                                 .addLast(new ConsumerHandler());
                     }
                 });

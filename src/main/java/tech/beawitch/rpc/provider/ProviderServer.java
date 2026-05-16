@@ -9,11 +9,17 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 import tech.beawitch.rpc.codec.CustomDecoder;
 import tech.beawitch.rpc.codec.CustomEncoder;
 import tech.beawitch.rpc.codec.ResponseEncoder;
+import tech.beawitch.rpc.compressor.CompressorManager;
+import tech.beawitch.rpc.handler.HeartbeatHandler;
+import tech.beawitch.rpc.handler.TrafficRecordHandler;
 import tech.beawitch.rpc.limit.Limiter;
 import tech.beawitch.rpc.limit.impl.ConcurrencyLimiter;
 import tech.beawitch.rpc.limit.impl.RateLimiter;
@@ -25,6 +31,7 @@ import tech.beawitch.rpc.register.ServiceMetadata;
 import tech.beawitch.rpc.register.ServiceRegistry;
 import tech.beawitch.rpc.serializer.SerializerManager;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
@@ -40,6 +47,8 @@ public class ProviderServer {
 
     private final SerializerManager serializerManager;
 
+    private final CompressorManager compressorManager;
+
     private NioEventLoopGroup bossEventLoopGroup;
     private NioEventLoopGroup workerEventLoopGroup;
 
@@ -49,6 +58,7 @@ public class ProviderServer {
         this.serviceRegistry = new DefaultServiceRegistry();
         this.globalLimiter = new ConcurrencyLimiter(providerProperties.getGlobalMaxRequest());
         this.serializerManager = new SerializerManager();
+        this.compressorManager = new CompressorManager();
     }
 
     public <I> void register(Class<I> interfaceClass, I serviceInstance) {
@@ -67,8 +77,11 @@ public class ProviderServer {
                         @Override
                         protected void initChannel(NioSocketChannel nioSocketChannel) throws Exception {
                             nioSocketChannel.pipeline()
+                                    .addLast(new TrafficRecordHandler())
                                     .addLast(new CustomDecoder())
                                     .addLast(new CustomEncoder())
+                                    .addLast(new IdleStateHandler(30, 5, 0, TimeUnit.SECONDS))
+                                    .addLast(new HeartbeatHandler())
                                     .addLast(new LimitHandler())
                                     .addLast(new ProviderHandler());
                         }
@@ -100,7 +113,8 @@ public class ProviderServer {
     public class LimitHandler extends ChannelDuplexHandler {
 
         private static final AttributeKey<Limiter> CHANNEL_LIMITER_KEY = AttributeKey.valueOf("channel_limiter_key");
-        private static final AttributeKey<AtomicInteger> GLOBAL_PERMISSIONS = AttributeKey.valueOf("global_permissions");
+        private static final AttributeKey<AtomicInteger> GLOBAL_PERMISSIONS = AttributeKey.valueOf(
+                "global_permissions");
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -137,6 +151,8 @@ public class ProviderServer {
             ctx.channel().attr(GLOBAL_PERMISSIONS).set(new AtomicInteger(0));
             ctx.channel().attr(CustomEncoder.SERIALIZER_KEY).set(providerProperties.getSerializerAlgorithm().getCode());
             ctx.channel().attr(CustomEncoder.SERIALIZER_MANAGER_KEY).set(serializerManager);
+            ctx.channel().attr(CustomEncoder.COMPRESSOR_KEY).set(providerProperties.getCompressorAlgorithm().getCode());
+            ctx.channel().attr(CustomEncoder.COMPRESSOR_MANAGER_KEY).set(compressorManager);
             ctx.fireChannelActive();
         }
 

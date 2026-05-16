@@ -28,7 +28,9 @@ public class Message {
     @Getter
     public enum MessageType {
         REQUEST(1, Request.class),
-        RESPONSE(2, Response.class);
+        RESPONSE(2, Response.class),
+        HEARTBEAT_REQUEST(3, HeartbeatRequest.class),
+        HEARTBEAT_RESPONSE(4, HeartbeatResponse.class);
 
         private static final Map<Class<?>, MessageType> CLASS_CACHE = new HashMap<>();
         private static final Map<Byte, MessageType> CODE_CACHE = new HashMap<>();
